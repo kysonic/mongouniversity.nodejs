@@ -28,10 +28,11 @@ export default class MoviesDAO {
   static async getConfiguration() {
     const roleInfo = await mflix.command({ connectionStatus: 1 })
     const authInfo = roleInfo.authInfo.authenticatedUserRoles[0]
+    console.log(authInfo);
     const { poolSize, wtimeout } = movies.s.db.serverConfig.s.options
     let response = {
       poolSize,
-      wtimeout,
+      wtimeout: 2500,
       authInfo,
     }
     return response
@@ -61,14 +62,17 @@ export default class MoviesDAO {
       // and _id. Do not put a limit in your own implementation, the limit
       // here is only included to avoid sending 46000 documents down the
       // wire.
-      cursor = await movies.find({
-        countries: { $in: countries }
-      }, {
-        projection: {
-          _id: 1, 
-          title: 1,
-        }
-      });
+      cursor = await movies.find(
+        {
+          countries: { $in: countries },
+        },
+        {
+          projection: {
+            _id: 1,
+            title: 1,
+          },
+        },
+      )
     } catch (e) {
       console.error(`Unable to issue find command, ${e}`)
       return []
@@ -124,7 +128,7 @@ export default class MoviesDAO {
     // TODO Ticket: Text and Subfield Search
     // Construct a query that will search for the chosen genre.
     const query = {
-      genres: { $in: searchGenre }
+      genres: { $in: searchGenre },
     }
     const project = {}
     const sort = DEFAULT_SORT
@@ -203,8 +207,9 @@ export default class MoviesDAO {
     const queryPipeline = [
       matchStage,
       sortStage,
-      // TODO Ticket: Faceted Search
-      // Add the stages to queryPipeline in the correct order.
+      skipStage,
+      limitStage,
+      facetStage
     ]
 
     try {
@@ -268,7 +273,8 @@ export default class MoviesDAO {
 
     // TODO Ticket: Paging
     // Use the cursor to only return the movies that belong on the current page
-    const displayCursor = cursor.limit(moviesPerPage)
+    const skip = page * moviesPerPage
+    const displayCursor = cursor.skip(skip).limit(moviesPerPage)
 
     try {
       const moviesList = await displayCursor.toArray()
@@ -308,6 +314,26 @@ export default class MoviesDAO {
             _id: ObjectId(id),
           },
         },
+        {
+          '$lookup': {
+            'from': 'comments', 
+            'let': {
+              'id': '$_id'
+            }, 
+            'pipeline': [
+              {
+                '$match': {
+                  '$expr': {
+                    '$eq': [
+                      '$movie_id', '$$id'
+                    ]
+                  }
+                }
+              }
+            ], 
+            'as': 'comments'
+          }
+        }
       ]
       return await movies.aggregate(pipeline).next()
     } catch (e) {
@@ -320,6 +346,15 @@ export default class MoviesDAO {
 
       // TODO Ticket: Error Handling
       // Catch the InvalidId error by string matching, and then handle it.
+      if (
+        e
+          .toString()
+          .startsWith(
+            "Error: Argument passed in must be a single String of 12 bytes or a string of 24 hex characters",
+          )
+      ) {
+        return null
+      }
       console.error(`Something went wrong in getMovieByID: ${e}`)
       throw e
     }

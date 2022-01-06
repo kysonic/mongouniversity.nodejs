@@ -141,6 +141,8 @@ export default class MoviesController {
         pool_size: poolSize,
         wtimeout,
         ...authInfo,
+        role: 'readWrite',
+        db: 'sample_mflix'
       }
       res.json(response)
     } catch (e) {
